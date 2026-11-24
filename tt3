@@ -26,8 +26,9 @@ local function mkBtn(txt,y,x,w,h,fn)
 	return b
 end
 local prim,sec,pkts={},{},{}
-local locked,running=false,false local mode,mult="BURST",50
-local sent,busy,fails=0,{P=false,R=false},0
+local locked,running,vary=false,false,false
+local mode,mult="BURST",50
+local sent,busy,fails,bump=0,{P=false,R=false},0,0
 local old=nil
 local status=mkLbl(120) local targetLbl=mkLbl(136) local gemLbl=mkLbl(152)
 status.Text="san sang"
@@ -60,8 +61,16 @@ local function sendPkt(p)
 end
 local function sendRemote(e)
 	if not e.r then return false end
+	local a=e.a
+	if vary then
+		bump=bump+1
+		local c={}
+		for i=1,e.n do c[i]=e.a[i] end
+		for i=e.n,1,-1 do if type(c[i])=="number" then c[i]=c[i]+bump break end end
+		a=c
+	end
 	return pcall(function()
-		if e.m=="InvokeServer" then e.r:InvokeServer(table.unpack(e.a,1,e.n)) else e.r:FireServer(table.unpack(e.a,1,e.n)) end
+		if e.m=="InvokeServer" then e.r:InvokeServer(table.unpack(a,1,e.n)) else e.r:FireServer(table.unpack(a,1,e.n)) end
 	end)
 end
 local function fire(key,e)
@@ -83,6 +92,7 @@ local function onNamecall(self,...)
 			local hit=l:find("gem")or l:find("claim")or l:find("reward")or l:find("crate")or l:find("spin")or l:find("daily")or l:find("quest")or l:find("box")or l:find("summon")or l:find("sell")or l:find("buy")or l:find("coin")or l:find("unit")or l:find("place")or l:find("trade")or l:find("accept")or l:find("mail")or l:find("post")
 			if hit then if #prim>40 then table.remove(prim,1) end prim[#prim+1]={r=self,a=a,n=n,m=m,name=nm} targetLbl.Text="R: "..nm
 			else if #sec>40 then table.remove(sec,1) end sec[#sec+1]={r=self,a=a,n=n,m=m,name=nm} end
+			print("CAP",n,m,tostring(a[1]),tostring(a[2]),tostring(a[3]),tostring(a[4]))
 		end
 	end
 	if type(old)=="function" then return old(self,...) end
@@ -162,7 +172,7 @@ local function startRun()
 	if #list==0 then status.Text="chua bat duoc goi tin" return end
 	local g0=readGem() local gs=g0
 	gemLbl.Text="gem: "..tostring(g0) targetLbl.Text=usePkt and "PKT 0x83" or ("R: "..tostring(list[1].name))
-	sent=0 fails=0 running=true btnDupe.Text="STOP"
+	sent=0 fails=0 bump=0 running=true btnDupe.Text="STOP"
 	task.spawn(function()
 		local i=0 local why=nil
 		while running and sent<mult do
@@ -191,8 +201,10 @@ mkBtn("x200",64,57,45,24,setMult(200))
 mkBtn("x1000",64,106,45,24,setMult(1000))
 mkBtn("x5000",64,155,45,24,setMult(5000))
 local btnMode
-btnMode=mkBtn("BURST",92,8,94,22,function() if mode=="BURST" then mode="SLOW" else mode="BURST" end btnMode.Text=mode status.Text="mode: "..mode end)
+btnMode=mkBtn("BURST",92,8,62,22,function() if mode=="BURST" then mode="SLOW" else mode="BURST" end btnMode.Text=mode status.Text="mode: "..mode end)
+local btnVary
+btnVary=mkBtn("FIXED",92,74,62,22,function() vary=not vary if vary then btnVary.Text="VARY" else btnVary.Text="FIXED" end status.Text=vary and "vary: bat" or "vary: tat" end)
 local btnLock
-btnLock=mkBtn("FREE",92,108,94,22,function() locked=not locked if locked then btnLock.Text="LOCK" else btnLock.Text="FREE" end status.Text=locked and "lock: bat" or "lock: tat" end)
+btnLock=mkBtn("FREE",92,140,62,22,function() locked=not locked if locked then btnLock.Text="LOCK" else btnLock.Text="FREE" end status.Text=locked and "lock: bat" or "lock: tat" end)
 print("S4 SAN SANG")
 print("S5 XONG")
