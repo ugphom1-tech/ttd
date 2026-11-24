@@ -1,0 +1,199 @@
+local U=game:GetService("UserInputService")
+local LP=game:GetService("Players").LocalPlayer
+local pg=LP:WaitForChild("PlayerGui")
+local function w(c,t) local o=Instance.new(c) for k,v in pairs(t) do o[k]=v end return o end
+local g=w("ScreenGui",{Name="Dp",ResetOnSpawn=false,IgnoreGuiInset=true,Parent=pg})
+local f=w("Frame",{Parent=g,Size=UDim2.fromOffset(190,150),Position=UDim2.new(0,12,0,120),BackgroundColor3=Color3.fromRGB(16,16,22),BorderSizePixel=0})
+local h=w("TextButton",{Parent=f,Size=UDim2.new(1,0,0,22),BackgroundColor3=Color3.fromRGB(46,120,255),Text="TTD DUPE",TextSize=13,TextColor3=Color3.new(1,1,1),Font=Enum.Font.GothamBold,BorderSizePixel=0})
+local lk=w("TextButton",{Parent=h,Size=UDim2.fromOffset(46,18),Position=UDim2.new(1,-50,0,2),BackgroundColor3=Color3.fromRGB(70,70,84),Text="FREE",TextSize=10,TextColor3=Color3.new(1,1,1),BorderSizePixel=0})
+local s=w("TextLabel",{Parent=f,Size=UDim2.new(1,-8,0,14),Position=UDim2.new(0,4,0,26),BackgroundTransparency=1,TextColor3=Color3.fromRGB(200,200,210),TextSize=11,Text="san sang",TextXAlignment=Enum.TextXAlignment.Left})
+local t2=w("TextLabel",{Parent=f,Size=UDim2.new(1,-8,0,26),Position=UDim2.new(0,4,0,42),BackgroundTransparency=1,TextColor3=Color3.fromRGB(130,225,170),TextSize=10,Text="chua ghi",TextWrapped=true,TextXAlignment=Enum.TextXAlignment.Left,TextYAlignment=Enum.TextYAlignment.Top})
+local gl=w("TextLabel",{Parent=f,Size=UDim2.new(1,-8,0,14),Position=UDim2.new(0,4,0,70),BackgroundTransparency=1,TextColor3=Color3.fromRGB(230,200,120),TextSize=11,Text="gem ?",TextXAlignment=Enum.TextXAlignment.Left})
+local b=w("TextButton",{Parent=f,Size=UDim2.new(1,-8,0,40),Position=UDim2.new(0,4,0,86),BackgroundColor3=Color3.fromRGB(36,200,110),Text="DUPE",TextSize=21,TextColor3=Color3.new(1,1,1),Font=Enum.Font.GothamBold,BorderSizePixel=0})
+local m=w("TextButton",{Parent=f,Size=UDim2.fromOffset(46,18),Position=UDim2.new(0,4,0,128),BackgroundColor3=Color3.fromRGB(70,70,84),Text="x200",TextSize=11,TextColor3=Color3.new(1,1,1),BorderSizePixel=0})
+local o=w("TextButton",{Parent=f,Size=UDim2.fromOffset(56,18),Position=UDim2.new(0,54,0,128),BackgroundColor3=Color3.fromRGB(150,90,40),Text="BURST",TextSize=10,TextColor3=Color3.new(1,1,1),BorderSizePixel=0})
+print("S1 MENU OK")
+local dg,ox,oy=false,0,0
+h.InputBegan:Connect(function(i)
+  local t=i.UserInputType
+  if t==Enum.UserInputType.Touch or t==Enum.UserInputType.MouseButton1 then dg=true ox=i.Position.X-f.AbsolutePosition.X oy=i.Position.Y-f.AbsolutePosition.Y end
+end)
+U.InputChanged:Connect(function(i) if dg then f.Position=UDim2.new(0,i.Position.X-ox,0,i.Position.Y-oy) end end)
+U.InputEnded:Connect(function() dg=false end)
+local K={"gem","claim","reward","crate","spin","daily","quest","box","summon","sell","buy","coin","unit","place","trade","accept","mail","post"}
+local ra,rk,pk={},{},{}
+local mul,md,lkf,run=200,1,false,false
+local tgt=nil
+local function push(t,i) t[#t+1]=i if #t>8 then table.remove(t,1) end end
+local function ui()
+  if tgt then t2.Text=tgt.n.." | "..tgt.c.."arg | "..math.floor(os.clock()-tgt.t).."s" else t2.Text="chua ghi" end
+  s.Text=#pk.."p "..#rk.."k "..#ra.."a"
+end
+local function gems()
+  local v=0
+  pcall(function()
+    local ls=LP:FindFirstChild("leaderstats")
+    if ls then for _,c in ipairs(ls:GetChildren()) do if c.Name:lower():find("gem") then v=math.max(v,tonumber(c.Value) or 0) end end end
+  end)
+  if v>0 then return v end
+  pcall(function()
+    for _,d in ipairs(pg:GetDescendants()) do
+      if d:IsA("TextLabel") and d.Visible and d.Text:lower():find("gem") then
+        local n=tonumber((d.Text:gsub("[^%d]","")))
+        if n and n>v then v=n end
+      end
+    end
+  end)
+  return v
+end
+local function sps(e)
+  local t={}
+  pcall(function() if raknet then t[#t+1]=raknet end end)
+  pcall(function() if rnet then t[#t+1]=rnet end end)
+  local d=e.a or e.s
+  for _,x in ipairs(t) do
+    for _,k in ipairs({"send","sendPacket"}) do
+      local fd
+      pcall(function() fd=x[k] end)
+      if type(fd)=="function" and (pcall(fd,d) or pcall(fd,x,d)) then return true end
+    end
+  end
+  return false
+end
+local function onpk(p)
+  local id
+  pcall(function() id=p.PacketId end)
+  if not id then pcall(function() id=p.id end) end
+  if id~=131 then return end
+  local a,z
+  pcall(function() a=p:AsArray() end)
+  if type(a)~="table" then pcall(function() a=p.data end) end
+  pcall(function() z=p:AsString() end)
+  if type(z)~="string" then pcall(function() z=p.Data end) end
+  if type(a)=="table" and #a>0 and #a<=400 then push(pk,{a=a})
+  elseif type(z)=="string" and #z>0 and #z<=400 then push(pk,{s=z})
+  else return end
+  ui()
+end
+pcall(function()
+  local a1=raknet and (raknet.add_send_hook or raknet.addSendHook)
+  if type(a1)=="function" then a1(onpk) return end
+  if raknet and raknet.Capture then raknet.Capture:Connect(onpk) end
+end)
+pcall(function() if rnet and type(rnet.add_send_hook)=="function" then rnet.add_send_hook(onpk) end end)
+print("S2 PKT OK")
+local mt,old
+pcall(function() old=hookmetamethod(game,"__namecall") end)
+if type(old)~="function" then pcall(function() mt=getrawmetatable(game) old=mt.__namecall end) end
+if type(old)=="function" then
+  local ok=pcall(function()
+    if not mt then mt=getrawmetatable(game) end
+    local ro
+    pcall(function() ro=setreadonly end)
+    if ro then ro(mt,false) end
+    mt.__namecall=function(se,...)
+      local n
+      local q=method
+      if not q then pcall(function() q=debug.info(2,"n") end) end
+      if q=="FireServer" or q=="InvokeServer" then
+        pcall(function() n=tostring(se) end)
+        if n then
+          local it={o=se,a={...},c=select("#",...),m=q,n=n,t=os.clock()}
+          push(ra,it)
+          local l=n:lower()
+          for _,k in ipairs(K) do if l:find(k,1,true) then push(rk,it) break end end
+          if not lkf then tgt=it end
+          ui()
+        end
+      end
+      return old(se,...)
+    end
+    if ro then ro(mt,true) end
+  end)
+  print(ok and "S3 RMT OK" or "S3 RMT ERR")
+else
+  print("S3 NO NC")
+end
+task.spawn(function()
+  while g.Parent do task.wait(1) if tgt then ui() end end
+end)
+local function fire(r) r.o[r.m](r.o,table.unpack(r.a,1,r.c)) end
+local function work()
+  local r=tgt
+  local e=pk[#pk]
+  if not r and not e then s.Text="chua ghi" return end
+  if run then run=false return end
+  run=true
+  b.Text="STOP"
+  b.BackgroundColor3=Color3.fromRGB(220,70,70)
+  local n=mul
+  local gb=gems()
+  local gp=gb
+  local dead=0
+  local sent=0
+  pcall(function()
+    for i=1,n do
+      if not run then break end
+      if e then
+        task.spawn(function() pcall(sps,e) end)
+      else
+        task.spawn(function() pcall(fire,r) end)
+      end
+      if md==2 then task.wait(0.03) end
+      if i%40==0 then
+        task.wait()
+        local gg=gems()
+        if gg>gp then dead=0 gp=gg else dead=dead+1 end
+        sent=i
+        s.Text=sent.."/"..n
+        if dead>=4 then break end
+      end
+    end
+  end)
+  run=false
+  b.Text="DUPE"
+  b.BackgroundColor3=Color3.fromRGB(36,200,110)
+  local gg=gems()
+  if gb>0 and gg>gb then
+    gl.Text="+"..(gg-gb).." gem"
+    gl.TextColor3=Color3.fromRGB(120,230,140)
+  elseif dead>=4 then
+    gl.Text="dung: khong an"
+    gl.TextColor3=Color3.fromRGB(230,120,120)
+  else
+    gl.Text="xong "..sent.." lan"
+  end
+end
+local cd=0
+b.InputBegan:Connect(function(i)
+  local t=i.UserInputType
+  if t==Enum.UserInputType.Touch or t==Enum.UserInputType.MouseButton1 then
+    local n=os.clock()
+    if n-cd>=0.25 then cd=n pcall(work) end
+  end
+end)
+m.InputBegan:Connect(function(i)
+  local t=i.UserInputType
+  if t==Enum.UserInputType.Touch or t==Enum.UserInputType.MouseButton1 then
+    mul=mul==50 and 200 or mul==200 and 1000 or mul==1000 and 5000 or 50
+    m.Text="x"..mul
+  end
+end)
+o.InputBegan:Connect(function(i)
+  local t=i.UserInputType
+  if t==Enum.UserInputType.Touch or t==Enum.UserInputType.MouseButton1 then
+    md=md==1 and 2 or 1
+    o.Text=md==1 and "BURST" or "SLOW"
+    o.BackgroundColor3=md==1 and Color3.fromRGB(150,90,40) or Color3.fromRGB(70,70,84)
+  end
+end)
+lk.InputBegan:Connect(function(i)
+  local t=i.UserInputType
+  if t==Enum.UserInputType.Touch or t==Enum.UserInputType.MouseButton1 then
+    lkf=not lkf
+    lk.Text=lkf and "LOCK" or "FREE"
+    lk.BackgroundColor3=lkf and Color3.fromRGB(200,60,60) or Color3.fromRGB(70,70,84)
+  end
+end)
+print("S4 NUT OK")
+print("S5 XONG")
