@@ -1,0 +1,173 @@
+-- D4 | hexdump 2 chieu + GUI replay
+local RS = game:GetService("ReplicatedStorage")
+local target = RS:FindFirstChild("DataRemote", true)
+assert(target, "DataRemote not found")
+
+local unpack = table.unpack or unpack
+
+local function deepcopy(v, seen)
+	seen = seen or {}
+	local tv = type(v)
+	if tv ~= "table" then return v end
+	if seen[v] then return seen[v] end
+	local out = {}
+	seen[v] = out
+	for k, x in pairs(v) do out[deepcopy(k, seen)] = deepcopy(x, seen) end
+	return out
+end
+
+local function asc(s) return (s:gsub("[^\32-\126]", ".")) end
+
+local function hx(s)
+	local t = table.create(#s)
+	for i = 1, #s do t[i] = string.format("%02X", s:byte(i)) end
+	return table.concat(t, " ")
+end
+
+local store, count = {}, 0
+
+local function dump(v, path, depth)
+	depth = depth or 0
+	local tv = type(v)
+	if tv == "table" then
+		if depth > 3 then print(path .. " = <nested>") return end
+		print(path .. " = table")
+		for k, x in pairs(v) do
+			local kp = path .. "{" .. tostring(k) .. "}"
+			dump(k, kp .. "<K>", depth + 1)
+			dump(x, kp, depth + 1)
+		end
+	elseif tv == "string" then
+		print(("%s = string len=%d"):format(path, #v))
+		print(path .. " ASC: " .. asc(v))
+		print(path .. " HEX: " .. hx(v))
+	else
+		print(("%s = %s %s"):format(path, tv, tostring(v)))
+	end
+end
+
+local parent = game:GetService("CoreGui")
+local ok, hui = pcall(function() return gethui() end)
+if ok and hui then parent = hui end
+
+local pg = Instance.new("ScreenGui")
+pg.Name = "D4"
+pg.ResetOnSpawn = false
+pg.DisplayOrder = 999
+pg.Parent = parent
+
+local main = Instance.new("Frame")
+main.Size = UDim2.fromOffset(240, 356)
+main.Position = UDim2.fromOffset(12, 12)
+main.BackgroundColor3 = Color3.fromRGB(22, 22, 26)
+main.BorderSizePixel = 0
+main.Active = true
+main.Draggable = true
+main.Parent = pg
+
+local list = Instance.new("ScrollingFrame")
+list.Size = UDim2.new(1, -8, 1, -92)
+list.Position = UDim2.fromOffset(4, 4)
+list.BackgroundTransparency = 1
+list.BorderSizePixel = 0
+list.CanvasSize = UDim2.new()
+list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+list.ScrollBarThickness = 4
+list.Parent = main
+
+local lay = Instance.new("UIListLayout")
+lay.Padding = UDim.new(0, 3)
+lay.Parent = list
+
+local function mkbtn(text, y, color)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1, -8, 0, 28)
+	b.Position = UDim2.fromOffset(4, y)
+	b.BackgroundColor3 = color
+	b.BorderSizePixel = 0
+	b.TextColor3 = Color3.new(1, 1, 1)
+	b.Font = Enum.Font.GothamMedium
+	b.TextSize = 13
+	b.Text = text
+	b.Parent = main
+	return b
+end
+
+local function replay(i)
+	local rec = store[i]
+	if not rec then return end
+	print(("[REPLAY %d]"):format(i))
+	local ok2, err = pcall(function() target:FireServer(unpack(rec)) end)
+	if not ok2 then print("replay err", err) end
+end
+
+local bAll = mkbtn("REPLAY ALL", 252, Color3.fromRGB(40, 90, 160))
+local bClr = mkbtn("CLEAR", 284, Color3.fromRGB(60, 60, 66))
+local bStop = mkbtn("STOP HOOK", 316, Color3.fromRGB(140, 45, 45))
+
+bAll.MouseButton1Click:Connect(function()
+	task.spawn(function()
+		for i = 1, count do
+			replay(i)
+			task.wait(0.2)
+		end
+	end)
+end)
+
+bClr.MouseButton1Click:Connect(function()
+	table.clear(store)
+	count = 0
+	bAll.Text = "REPLAY ALL"
+	for _, c in ipairs(list:GetChildren()) do
+		if c:IsA("TextButton") then c:Destroy() end
+	end
+	print("CLEARED")
+end)
+
+local function addButton(i)
+	local b = Instance.new("TextButton")
+	b.Size = UDim2.new(1, 0, 0, 26)
+	b.BackgroundColor3 = Color3.fromRGB(38, 38, 44)
+	b.BorderSizePixel = 0
+	b.TextColor3 = Color3.fromRGB(200, 220, 255)
+	b.Font = Enum.Font.Code
+	b.TextSize = 13
+	b.Text = ("#%d replay"):format(i)
+	b.Parent = list
+	b.MouseButton1Click:Connect(function() replay(i) end)
+end
+
+local old
+old = hookmetamethod(game, "__namecall", function(self, ...)
+	local m = getnamecallmethod()
+	if self == target then
+		if m == "FireServer" then
+			local args = { ... }
+			count += 1
+			local i = count
+			store[i] = deepcopy(args)
+			print(("=== %d | t=%.2f | n=%d"):format(i, os.clock(), #args))
+			for k = 1, #args do dump(args[k], "arg" .. k) end
+			addButton(i)
+			bAll.Text = "REPLAY ALL (" .. count .. ")"
+		elseif m == "Fire" then
+			print(("--- SERVER %d | t=%.2f"):format(count, os.clock()))
+			local r = { ... }
+			for k = 1, #r do dump(r[k], "srv" .. k) end
+		end
+	end
+	return old(self, ...)
+end)
+
+print("D4 ready")
+
+local stopped = false
+local function stop()
+	if stopped then return end
+	stopped = true
+	pcall(function() hookmetamethod(game, "__namecall", old) end)
+	print("HOOK OFF")
+end
+
+bStop.MouseButton1Click:Connect(stop)
+task.delay(60, stop)
