@@ -1,0 +1,141 @@
+--// D12 - dupe button | TTD
+local RS = game:GetService("ReplicatedStorage")
+local R  = RS:WaitForChild("NetworkingContainer"):WaitForChild("DataRemote")
+local PLR = game:GetService("Players").LocalPlayer
+
+local function hx(s) return (s:gsub("%s+",""):gsub("%x%x", function(c) return string.char(tonumber(c,16)) end)) end
+local function tohex(s) local t={} for i=1,#s do t[i]=("%02X"):format(s:byte(i)) end return table.concat(t) end
+local function rnd16()
+  if crypt and crypt.generatebytes then local ok,b = pcall(crypt.generatebytes,16)
+    if ok and type(b)=="string" and #b==16 then return b end end
+  local t={} for i=1,16 do t[i]=string.char(math.random(0,255)) end return table.concat(t)
+end
+
+local function parse(txt)
+  local out = {}
+  for line in txt:gmatch("[^\r\n]+") do
+    local a,b,c = line:match("^([%x]+)|([%x]+)|?([%x]*)$")
+    if a and b then
+      local p = { hx(a), hx(b) }
+      if c and c ~= "" then p[3] = c end
+      out[#out+1] = p
+    end
+  end
+  return out
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name, gui.ResetOnSpawn, gui.DisplayOrder = "D12", false, 99
+gui.Parent = PLR:WaitForChild("PlayerGui")
+
+local f = Instance.new("Frame")
+f.Size, f.Position, f.BackgroundColor3 = UDim2.fromOffset(300, 260), UDim2.new(0,10,0,10), Color3.fromRGB(24,24,28)
+f.Active, f.Draggable = true, true
+f.Parent = gui
+Instance.new("UICorner", f).CornerRadius = UDim.new(0,8)
+
+local title = Instance.new("TextLabel")
+title.Size, title.BackgroundTransparency, title.TextColor3 = UDim2.new(1,0,0,22), 1, Color3.fromRGB(120,220,140)
+title.Text, title.TextSize, title.Font = "D12 dupe", 14, Enum.Font.Code
+title.Parent = f
+
+local box = Instance.new("TextBox")
+box.Size, box.Position, box.BackgroundColor3 = UDim2.new(1,-12,0,120), UDim2.fromOffset(6,26), Color3.fromRGB(14,14,16)
+box.TextColor3, box.TextSize, box.Font = Color3.fromRGB(200,200,200), 11, Enum.Font.Code
+box.TextXAlignment, box.ClearTextOnFocus = Enum.TextXAlignment.Left, false
+box.MultiLine, box.TextWrapped, box.PlaceholderText = true, true, "opcode|arg2|arg3  (moi fire 1 dong)"
+box.Text = ""
+box.Parent = f
+Instance.new("UICorner", box).CornerRadius = UDim.new(0,6)
+
+local function btn(txt, y, col, fn)
+  local b = Instance.new("TextButton")
+  b.Size, b.Position, b.BackgroundColor3 = UDim2.new(0.5,-9,0,30), UDim2.new(0,6,0,y), col
+  b.Text, b.TextColor3, b.TextSize, b.Font = txt, Color3.new(1,1,1), 13, Enum.Font.Code
+  b.Parent = f
+  Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+  b.MouseButton1Click:Connect(fn)
+  return b
+end
+
+local status = Instance.new("TextLabel")
+status.Size, status.Position, status.BackgroundTransparency = UDim2.new(1,-12,0,16), UDim2.new(0,6,0,240)
+status.TextColor3, status.TextSize, status.Font = Color3.fromRGB(150,150,160), 10, Enum.Font.Code
+status.TextXAlignment, status.Text = Enum.TextXAlignment.Left, "san sang"
+status.Parent = f
+
+-- capture
+local prev, mode, raw, armed = nil, nil, {}, false
+
+local function unhook()
+  if not prev then return end
+  local p, m = prev, mode
+  prev, armed = nil, false
+  if m == "nm" then pcall(hookmetamethod, game, "__namecall", p)
+  else pcall(hookfunction, R.FireServer, p) end
+end
+
+local function onfire(tbl)
+  if #raw >= 12 then return end
+  raw[#raw+1] = tbl
+  local lines = {}
+  for _, p in ipairs(raw) do
+    lines[#lines+1] = table.concat({ tohex(p[1] or ""), tohex(p[2] or ""), p[3] or "" }, "|")
+  end
+  box.Text = table.concat(lines, "\n")
+  status.Text = ("da bat %d fire"):format(#raw)
+end
+
+local function grab(self, ...)
+  if self ~= R and not (typeof(self) == "Instance" and self.Name == "DataRemote") then return end
+  local a = select(1, ...)
+  if type(a) == "table" then onfire(a) end
+end
+
+local function arm()
+  if armed then return end
+  raw, armed = {}, true
+  box.Text = ""
+  if hookmetamethod and getnamecallmethod then
+    mode = "nm"
+    prev = hookmetamethod(game, "__namecall", function(self, ...)
+      if armed then pcall(grab, self, ...) end
+      if prev then return prev(self, ...) end
+    end)
+  else
+    mode = "hf"
+    prev = hookfunction(R.FireServer, function(...)
+      if armed then pcall(grab, R, ...) end
+      if prev then return prev(...) end
+    end)
+  end
+  status.Text = "dang bat - bam Claim/Summon ngay"
+  task.delay(20, function() if armed then unhook() status.Text = "het gio bat" end end)
+end
+
+-- fire
+local count = 2
+local function fire()
+  local b = parse(box.Text)
+  if #b == 0 then status.Text = "payload rong hoac sai format" return end
+  if armed then unhook() end
+  status.Text = ("ban %dx%d fire"):format(count, #b)
+  task.spawn(function()
+    for i = 1, count do
+      for _, p in ipairs(b) do
+        local q = { p[1], rnd16() }
+        if p[3] then q[3] = p[3] end
+        pcall(function() R:FireServer(q) end)
+        task.wait(0.12)
+      end
+      task.wait(0.35)
+    end
+    status.Text = "xong"
+  end)
+end
+
+btn("BAT (20s)", 152, Color3.fromRGB(50,110,70), arm)
+btn("FIRE x2", 152, Color3.fromRGB(60,70,140), fire).Position = UDim2.new(0.5,3,0,152)
+btn("x1", 186, Color3.fromRGB(45,45,55), function() count = 1 status.Text = "count=1" end)
+btn("x3", 186, Color3.fromRGB(45,45,55), function() count = 3 status.Text = "count=3" end).Position = UDim2.new(0.5,3,0,186)
+btn("THAO", 220, Color3.fromRGB(90,50,50), function() unhook() status.Text = "da thao" end)
