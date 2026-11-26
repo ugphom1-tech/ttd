@@ -1,0 +1,214 @@
+-- D9 fix de quy
+local WEBHOOK = "https://discord.com/api/webhooks/1575380934860079217/70M7ZvEDzmoCA_YGtpvTc4khFp36TsZTQoLLwcOE5IfNoPEPRIXTqUORdcY8bZFgTNUf"
+
+local RS = game:GetService("ReplicatedStorage")
+local PL = game:GetService("Players").LocalPlayer
+local HS = game:GetService("HttpService")
+local unpack = table.unpack or unpack
+
+local req = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
+print(req and "HTTP OK" or "KHONG CO HTTP - chi in console")
+
+local MAXLEN, MAXCAP, ARMTIME, MAXTOTAL, MAXPATH = 96, 12, 25, 14000, 60
+local store, count, buf, total = {}, 0, {}, 0
+local busy, armed, inHook, prev = false, false, false, nil
+local disarm, arm
+
+local function deepcopy(v, seen)
+	seen = seen or {}
+	local tv = type(v)
+	if tv ~= "table" then return v end
+	if seen[v] then return seen[v] end
+	local o = {}
+	seen[v] = o
+	for k, x in pairs(v) do o[deepcopy(k, seen)] = deepcopy(x, seen) end
+	return o
+end
+
+local function hex(s)
+	local n = math.min(#s, MAXLEN)
+	local t = table.create(n)
+	for i = 1, n do t[i] = string.format("%02X", s:byte(i)) end
+	local o = table.concat(t, " ")
+	if #s > n then o ..= (" +%d"):format(#s - n) end
+	return o
+end
+
+local function asc(s)
+	return (s:sub(1, math.min(#s, MAXLEN)):gsub("[^\32-\126]", "."))
+end
+
+local function walk(v, path, out)
+	local tv = type(v)
+	if tv == "table" then
+		for k, x in pairs(v) do
+			walk(x, type(k) == "number" and (path .. "[" .. k .. "]") or (path .. "." .. tostring(k)), out)
+		end
+	elseif tv == "string" then
+		out[#out + 1] = ("%s len=%d HEX=%s ASC=%s"):format(path, #v, hex(v), asc(v))
+	elseif tv == "Instance" then
+		out[#out + 1] = ("%s Instance=%s"):format(path, v:GetFullName())
+	else
+		out[#out + 1] = ("%s %s=%s"):format(path, tv, tostring(v))
+	end
+end
+
+local function post(content)
+	if not req then return end
+	local body = HS:JSONEncode({ content = content, username = "D9", allowed_mentions = { parse = {} } })
+	local ok, res = pcall(req, {
+		Url = WEBHOOK,
+		Method = "POST",
+		Headers = { ["Content-Type"] = "application/json", ["User-Agent"] = "Mozilla/5.0" },
+		Body = body,
+	})
+	if not ok then print("post err " .. tostring(res))
+	elseif type(res) == "table" and tonumber(res.StatusCode) and res.StatusCode >= 400 then
+		print("http " .. res.StatusCode .. " " .. tostring(res.Body))
+	end
+end
+
+local function send(text)
+	if not WEBHOOK:match("^https://") then return print("chua co webhook") end
+	local head = ("**D9** `%s`\nplace=%s job=%s\nremotes=%d\n"):format(PL.Name, game.PlaceId, game.JobId, #rpaths)
+	local acc = head
+	for line in (text .. "\n"):gmatch("(.-)\n") do
+		if #acc + #line > 1850 then
+			post(acc)
+			task.wait(0.8)
+			acc = ""
+		end
+		acc ..= line .. "\n"
+	end
+	if #acc > 0 then post(acc) end
+end
+
+-- quet: tinh san duong dan, khong dung namecall trong hook
+local remoteset, pathmap, rfset, rpaths = {}, {}, {}, {}
+local function scan(root)
+	for _, d in ipairs(root:GetDescendants()) do
+		local isRF = d:IsA("RemoteFunction")
+		if isRF or d:IsA("RemoteEvent") then
+			local p = d:GetFullName()
+			remoteset[d] = true
+			pathmap[d] = p
+			rfset[d] = isRF
+			if #rpaths < MAXPATH then
+				rpaths[#rpaths + 1] = (isRF and "[RF] " or "[RE] ") .. p
+			end
+		end
+	end
+end
+scan(RS)
+scan(PL)
+scan(game:GetService("ReplicatedFirst"))
+print(("quet duoc %d remote"):format(#rpaths))
+for i = 1, #rpaths do print(" " .. rpaths[i]) end
+
+local function flush()
+	if #buf == 0 then return end
+	local text = table.concat(buf, "\n")
+	table.clear(buf)
+	if writefile then pcall(writefile, ("d9_%d.txt"):format(os.time()), text) end
+	send(text)
+end
+
+local function capture(inst, args)
+	count += 1
+	local i = count
+	store[i] = { inst = inst, args = deepcopy(args), kind = rfset[inst] and "RF" or "RE" }
+	local out = { ("=== %d %s n=%d"):format(i, pathmap[inst] or "?", #args) }
+	for k = 1, #args do walk(args[k], "a" .. k, out) end
+	local block = table.concat(out, "\n")
+	buf[#buf + 1] = block
+	total += #block
+	print(block)
+	if count >= MAXCAP or total >= MAXTOTAL then disarm() end
+end
+
+disarm = function()
+	if not armed then return end
+	armed = false
+	print(("ARM OFF cap=%d"):format(count))
+	task.spawn(function()
+		task.wait(0.5)
+		flush()
+		task.wait(1.5)
+		if prev then
+			pcall(function() hookmetamethod(game, "__namecall", prev) end)
+			prev = nil
+			print("HOOK GO")
+		end
+	end)
+end
+
+local function hookfn(self, ...)
+	if inHook then return prev(self, ...) end
+	if not remoteset[self] then return prev(self, ...) end
+	if not armed or busy then return prev(self, ...) end
+	local m = getnamecallmethod()
+	if m ~= "FireServer" and m ~= "InvokeServer" then return prev(self, ...) end
+	inHook = true
+	local ok, err = pcall(capture, self, { ... })
+	inHook = false
+	if not ok then print("HOOK ERR " .. tostring(err)) end
+	return prev(self, ...)
+end
+
+arm = function()
+	if armed then return end
+	if not prev then
+		local okh, errh = pcall(function() prev = hookmetamethod(game, "__namecall", hookfn) end)
+		if not okh then return print("HOOK FAIL " .. tostring(errh)) end
+	end
+	armed = true
+	print("ARMED 25s - claim ngay")
+	task.delay(ARMTIME, disarm)
+end
+
+local function r(i)
+	local rec = store[tonumber(i) or 0]
+	if not rec then return print("khong co") end
+	busy = true
+	local ok, err = pcall(function()
+		if rec.kind == "RF" then rec.inst:InvokeServer(unpack(rec.args))
+		else rec.inst:FireServer(unpack(rec.args)) end
+	end)
+	busy = false
+	print(ok and "replay ok" or ("replay err " .. tostring(err)))
+end
+
+local function d(i)
+	local rec = store[tonumber(i) or 0]
+	if not rec then return print("khong co") end
+	local out = { ("=== %d"):format(i) }
+	for k = 1, #rec.args do walk(rec.args[k], "a" .. k, out) end
+	print(table.concat(out, "\n"))
+end
+
+local function s(i, f, v)
+	local rec = store[tonumber(i) or 0]
+	if not rec or not rec.args[1] then return print("khong co") end
+	rec.args[1][tonumber(f) or 0] = v
+	print("ok")
+end
+
+local function kill()
+	armed = false
+	if prev then
+		pcall(function() hookmetamethod(game, "__namecall", prev) end)
+		prev = nil
+	end
+	print("HOOK GO")
+end
+
+getgenv()._flush, getgenv()._d, getgenv()._s, getgenv()._r = flush, d, s, r
+getgenv()._arm, getgenv()._stop = arm, kill
+getgenv()._hook = function(u) WEBHOOK = u; print("hook set") end
+getgenv()._test = function() post("**D9 alive** place=" .. game.PlaceId .. " user=" .. PL.Name) end
+
+_test()
+task.wait(1.5)
+if #rpaths > 0 then send("```\n" .. table.concat(rpaths, "\n") .. "\n```") end
+task.wait(1.2)
+arm()
